@@ -1,6 +1,6 @@
 # install-python
 
-One-command Python source installer for Linux.
+One-command Python source installer for Linux.😀
 
 This script downloads official CPython source code, installs build dependencies, compiles Python, installs it under `/opt/python/<version>` by default, and creates safe command links in `/usr/local/bin`.
 
