@@ -5,6 +5,7 @@ DEFAULT_VERSION="3.14.6"
 VERSION="$DEFAULT_VERSION"
 PREFIX_BASE="/opt/python"
 SET_DEFAULT="false"
+SET_DEFAULT_ONLY="false"
 KEEP_BUILD_DIR="false"
 SKIP_DEPS="false"
 UPGRADE_PIP="false"
@@ -23,6 +24,8 @@ Options:
                         Final path will be PATH/VERSION.
   --set-default         Also create python and pip commands in /usr/local/bin.
                         Without this option, only pythonX.Y and pipX.Y are created.
+  --set-default-only    Only make python and pip point to an existing installation.
+                        This does not download, build, or install Python.
   --skip-deps           Skip dependency installation.
   --upgrade-pip         Upgrade pip, setuptools, and wheel from PyPI after install.
   --keep-build-dir      Keep the temporary build directory.
@@ -32,6 +35,7 @@ Examples:
   bash install-python.sh
   bash install-python.sh --version 3.14.6
   bash install-python.sh --version 3.14.6 --set-default
+  bash install-python.sh --version 3.14.6 --set-default-only
   bash install-python.sh --version 3.14.6 --prefix /usr/local/python
 EOF
 }
@@ -87,6 +91,11 @@ parse_args() {
         shift 2
         ;;
       --set-default)
+        SET_DEFAULT="true"
+        shift
+        ;;
+      --set-default-only)
+        SET_DEFAULT_ONLY="true"
         SET_DEFAULT="true"
         shift
         ;;
@@ -174,6 +183,17 @@ install_deps() {
   fi
 }
 
+set_python_paths() {
+  local prefix="${PREFIX_BASE}/${VERSION}"
+
+  PYTHON_BIN="${prefix}/bin/python${PY_ABI}"
+  PIP_BIN="${prefix}/bin/pip${PY_ABI}"
+
+  if [ ! -x "$PIP_BIN" ]; then
+    PIP_BIN="${prefix}/bin/pip3"
+  fi
+}
+
 choose_downloader() {
   if command -v curl >/dev/null 2>&1; then
     DOWNLOADER="curl"
@@ -219,8 +239,7 @@ build_and_install() {
   log "Installing with make altinstall..."
   run_as_root make altinstall
 
-  PYTHON_BIN="${prefix}/bin/python${PY_ABI}"
-  PIP_BIN="${prefix}/bin/pip${PY_ABI}"
+  set_python_paths
 
   [ -x "$PYTHON_BIN" ] || die "Python binary was not found after install: $PYTHON_BIN"
 
@@ -232,9 +251,7 @@ build_and_install() {
     run_as_root "$PYTHON_BIN" -m pip install --upgrade pip setuptools wheel
   fi
 
-  if [ ! -x "$PIP_BIN" ]; then
-    PIP_BIN="${prefix}/bin/pip3"
-  fi
+  set_python_paths
 }
 
 create_links() {
@@ -257,6 +274,27 @@ create_links() {
     fi
   else
     warn "Default python command was not changed. Use --set-default if you want /usr/local/bin/python."
+  fi
+}
+
+set_default_only() {
+  set_python_paths
+
+  [ -x "$PYTHON_BIN" ] || die "Existing Python was not found: $PYTHON_BIN"
+  [ -x "$PIP_BIN" ] || warn "pip was not found for this installation: $PIP_BIN"
+
+  log "Creating default python and pip command links for existing Python $VERSION..."
+  run_as_root mkdir -p /usr/local/bin
+  run_as_root ln -sfn "$PYTHON_BIN" /usr/local/bin/python
+
+  if [ -x "$PIP_BIN" ]; then
+    run_as_root ln -sfn "$PIP_BIN" /usr/local/bin/pip
+  fi
+
+  log "Default command links were updated."
+  "$PYTHON_BIN" --version
+  if [ -x "$PIP_BIN" ]; then
+    "$PYTHON_BIN" -m pip --version
   fi
 }
 
@@ -301,13 +339,18 @@ EOF
 main() {
   parse_args "$@"
   validate_version
-  detect_os
-
-  log "Detected OS: ${PRETTY_NAME:-$OS_ID}"
   log "Python version: $VERSION"
   log "Install base: $PREFIX_BASE"
 
   need_cmd id
+
+  if [ "$SET_DEFAULT_ONLY" = "true" ]; then
+    set_default_only
+    exit 0
+  fi
+
+  detect_os
+  log "Detected OS: ${PRETTY_NAME:-$OS_ID}"
 
   install_deps
   need_cmd tar
